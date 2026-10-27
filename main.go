@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -11,28 +10,22 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"strings"
 	"syscall"
 
+	mihomocmd "github.com/metacubex/mihomo/cmd"
 	"github.com/metacubex/mihomo/common/cmd"
 	"github.com/metacubex/mihomo/component/age"
-	"github.com/metacubex/mihomo/component/generator"
 	"github.com/metacubex/mihomo/component/geodata"
 	"github.com/metacubex/mihomo/component/updater"
 	"github.com/metacubex/mihomo/config"
 	C "github.com/metacubex/mihomo/constant"
-	"github.com/metacubex/mihomo/constant/features"
 	"github.com/metacubex/mihomo/hub"
 	"github.com/metacubex/mihomo/hub/executor"
 	"github.com/metacubex/mihomo/log"
-	"github.com/metacubex/mihomo/rules/provider"
-
-	"go.uber.org/automaxprocs/maxprocs"
+	_ "go.uber.org/automaxprocs/maxprocs"
 )
 
 var (
-	version                       bool
 	testConfig                    bool
 	geodataMode                   bool
 	homeDir                       string
@@ -51,33 +44,35 @@ var (
 	postDown                      string
 )
 
-func getIntEnv(key string) int {
-	value := os.Getenv(key)
-	intValue, _ := strconv.Atoi(value)
-	return intValue
-}
-
-func init() {
-	flag.StringVar(&homeDir, "d", os.Getenv("CLASH_HOME_DIR"), "set configuration directory")
-	flag.StringVar(&configFile, "f", os.Getenv("CLASH_CONFIG_FILE"), "specify configuration file")
-	flag.StringVar(&configString, "config", os.Getenv("CLASH_CONFIG_STRING"), "specify base64-encoded configuration string")
-	flag.StringVar(&ageSecretKey, "age-secret-key", os.Getenv("CLASH_AGE_SECRET_KEY"), "specify age secret key to decrypt configuration")
-	flag.StringVar(&externalUI, "ext-ui", os.Getenv("CLASH_OVERRIDE_EXTERNAL_UI_DIR"), "override external ui directory")
-	flag.StringVar(&externalController, "ext-ctl", os.Getenv("CLASH_OVERRIDE_EXTERNAL_CONTROLLER"), "override external controller address")
-	flag.StringVar(&externalControllerTLS, "ext-ctl-tls", os.Getenv("CLASH_OVERRIDE_EXTERNAL_CONTROLLER_TLS"), "override external controller tls address")
-	flag.StringVar(&externalControllerUnix, "ext-ctl-unix", os.Getenv("CLASH_OVERRIDE_EXTERNAL_CONTROLLER_UNIX"), "override external controller unix address")
-	flag.StringVar(&externalControllerPipe, "ext-ctl-pipe", os.Getenv("CLASH_OVERRIDE_EXTERNAL_CONTROLLER_PIPE"), "override external controller pipe address")
-	flag.IntVar(&externalControllerRoutingMark, "ext-ctl-routing-mark", getIntEnv("CLASH_OVERRIDE_EXTERNAL_CONTROLLER_ROUTING_MARK"), "override external controller routing mark")
-	flag.StringVar(&secret, "secret", os.Getenv("CLASH_OVERRIDE_SECRET"), "override secret for RESTful API")
-	flag.StringVar(&postUp, "post-up", os.Getenv("CLASH_POST_UP"), "set post-up script")
-	flag.StringVar(&postDown, "post-down", os.Getenv("CLASH_POST_DOWN"), "set post-down script")
-	flag.BoolVar(&geodataMode, "m", false, "set geodata mode")
-	flag.BoolVar(&version, "v", false, "show current version of mihomo")
-	flag.BoolVar(&testConfig, "t", false, "test configuration and exit")
-	flag.Parse()
-}
-
 func main() {
+	if err := executeCLI(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func executeCLI() error {
+	return mihomocmd.Execute(func(options mihomocmd.Options) {
+		testConfig = options.TestConfig
+		geodataMode = options.GeodataMode
+		homeDir = options.HomeDir
+		configFile = options.ConfigFile
+		configString = options.ConfigString
+		ageSecretKey = options.AgeSecretKey
+		externalUI = options.ExternalUI
+		externalController = options.ExternalController
+		externalControllerTLS = options.ExternalControllerTLS
+		externalControllerUnix = options.ExternalControllerUnix
+		externalControllerPipe = options.ExternalControllerPipe
+		externalControllerRoutingMark = options.ExternalControllerRoutingMark
+		secret = options.Secret
+		postUp = options.PostUp
+		postDown = options.PostDown
+		runMihomo()
+	})
+}
+
+func runMihomo() {
 	// Defensive programming: panic when code mistakenly calls net.DefaultResolver
 	net.DefaultResolver.PreferGo = true
 	net.DefaultResolver.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -96,32 +91,7 @@ func main() {
 		return nil, nil
 	}
 
-	_, _ = maxprocs.Set(maxprocs.Logger(func(string, ...any) {}))
-
-	if len(os.Args) > 1 && os.Args[1] == "convert-ruleset" {
-		provider.ConvertMain(os.Args[2:])
-		return
-	}
-
-	if len(os.Args) > 1 && os.Args[1] == "generate" {
-		generator.Main(os.Args[2:])
-		return
-	}
-
-	if len(os.Args) > 1 && os.Args[1] == "age" {
-		age.Main(os.Args[2:])
-		return
-	}
-
-	if version {
-		fmt.Printf("Mihomo Meta %s %s %s with %s %s\n",
-			C.Version, runtime.GOOS, runtime.GOARCH, runtime.Version(), C.BuildTime)
-		if tags := features.Tags(); len(tags) != 0 {
-			fmt.Printf("Use tags: %s\n", strings.Join(tags, ", "))
-		}
-
-		return
-	}
+	// _, _ = maxprocs.Set(maxprocs.Logger(func(string, ...any) {}))
 
 	if homeDir != "" {
 		if !filepath.IsAbs(homeDir) {
